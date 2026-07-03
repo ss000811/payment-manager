@@ -1,0 +1,253 @@
+/* ─────────────────────────────────────────────────────────
+   支払い管理システム Ver.2.0  カスタムスタイル
+   ───────────────────────────────────────────────────────── */
+
+/* フォント */
+html, body, [class*="css"] {
+    font-family: "游ゴシック", "Yu Gothic", "ヒラギノ角ゴ Pro", sans-serif;
+}
+
+/* ─── サイドバー ─────────────────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #1F4E79 0%, #2E75B6 100%);
+    color: #fff;
+}
+
+section[data-testid="stSidebar"] .stRadio label {
+    color: #fff !important;
+    font-size: 15px;
+}
+
+section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p {
+    color: #BDD7EE;
+    font-size: 13px;
+}
+
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.2);
+}
+
+/* ─── ヘッダー・タイトル ────────────────────────────────── */
+h1 { color: #1F4E79; font-weight: 700; }
+h2 { color: #1F4E79; font-weight: 600; border-bottom: 2px solid #2E75B6; padding-bottom: 4px; }
+h3 { color: #2E75B6; font-weight: 600; }
+h4 { color: #2E75B6; font-weight: 600; }
+
+/* ─── メトリクスカード ──────────────────────────────────── */
+[data-testid="metric-container"] {
+    background: #fff;
+    border: 1px solid #DEEAF1;
+    border-radius: 10px;
+    padding: 14px 18px !important;
+    box-shadow: 0 2px 8px rgba(31,78,121,0.08);
+    transition: box-shadow 0.2s;
+}
+
+[data-testid="metric-container"]:hover {
+    box-shadow: 0 4px 16px rgba(31,78,121,0.15);
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 13px !important;
+    color: #595959 !important;
+    font-weight: 500 !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    color: #1F4E79 !important;
+}
+
+/* ─── ボタン ──────────────────────────────────────────────── */
+.stButton > button {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s;
+    border: 1px solid #DEEAF1;
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #1F4E79, #2E75B6);
+    color: #fff;
+    border: none;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, #163d61, #1F4E79);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(31,78,121,0.3);
+}
+
+.stButton > button:not([kind="primary"]):hover {
+    border-color: #2E75B6;
+    color: #1F4E79;
+    transform: translateY(-1px);
+}
+
+/* ダウンロードボタン */
+.stDownloadButton > button {
+    border-radius: 8px;
+    font-weight: 500;
+    border: 1px solid #DEEAF1;
+    transition: all 0.2s;
+}
+
+/* ─── データフレーム ─────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #DEEAF1;
+}
+
+/* ─── フォーム ───────────────────────────────────────────── */
+[data-testid="stForm"] {
+    background: #FAFCFF;
+    border: 1px solid #DEEAF1;
+    border-radius: 12px;
+    padding: 20px;
+}
+
+/* ─── テキスト入力 ───────────────────────────────────────── */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stTextArea > div > div > textarea {
+    border-radius: 8px;
+    border: 1px solid #DEEAF1;
+    transition: border-color 0.2s;
+}
+
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: #2E75B6;
+    box-shadow: 0 0 0 3px rgba(46,117,182,0.1);
+}
+
+/* ─── セレクトボックス ──────────────────────────────────── */
+.stSelectbox > div > div {
+    border-radius: 8px;
+    border: 1px solid #DEEAF1;
+}
+
+/* ─── タブ ───────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    border-bottom: 2px solid #DEEAF1;
+}
+
+.stTabs [data-baseweb="tab"] {
+    font-weight: 500;
+    color: #595959;
+    padding: 8px 20px;
+}
+
+.stTabs [aria-selected="true"] {
+    color: #1F4E79 !important;
+    border-bottom: 2px solid #1F4E79;
+}
+
+/* ─── 通知・アラート ─────────────────────────────────────── */
+.stAlert {
+    border-radius: 8px;
+}
+
+/* ─── ダイアログ ─────────────────────────────────────────── */
+[data-testid="stDialog"] > div {
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+}
+
+/* ─── セパレーター ───────────────────────────────────────── */
+hr {
+    border-color: #DEEAF1;
+    margin: 16px 0;
+}
+
+/* ─── チェックボックス ──────────────────────────────────── */
+.stCheckbox > label {
+    font-size: 14px;
+}
+
+/* ─── スピナー ───────────────────────────────────────────── */
+.stSpinner > div {
+    border-top-color: #2E75B6 !important;
+}
+
+/* ─── エキスパンダー ────────────────────────────────────── */
+.streamlit-expanderHeader {
+    border-radius: 8px;
+    font-weight: 500;
+    color: #1F4E79;
+}
+
+/* ─── ラジオボタン ───────────────────────────────────────── */
+.stRadio > div {
+    gap: 12px;
+}
+
+/* ─── レスポンシブ対応 ──────────────────────────────────── */
+@media (max-width: 768px) {
+    [data-testid="stMetricValue"] {
+        font-size: 18px !important;
+    }
+    h2 { font-size: 18px; }
+    .stButton > button { font-size: 13px; }
+}
+
+/* ─── トースト通知 ───────────────────────────────────────── */
+[data-testid="stToast"] {
+    border-radius: 10px;
+    font-weight: 500;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+/* ─── ツールチップ ───────────────────────────────────────── */
+.stTooltipIcon {
+    color: #2E75B6;
+}
+
+/* ─── サイドバーナビゲーションラベル ──────────────────────── */
+.sidebar-section-label {
+    color: rgba(255,255,255,0.6);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 0 4px;
+}
+
+/* ─── カスタムバッジ ────────────────────────────────────── */
+.badge-paid {
+    background: #E8F5E9;
+    color: #2E7D32;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-overdue {
+    background: #FFEBEE;
+    color: #C62828;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-due-soon {
+    background: #FFF8E1;
+    color: #E65100;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-unpaid {
+    background: #E3F2FD;
+    color: #1565C0;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
