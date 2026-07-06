@@ -150,13 +150,13 @@ with st.sidebar:
 # ─── ページルーティング ──────────────────────────────────────
 
 if page == "dashboard":
-    from pages.dashboard import show_dashboard
+    from views.dashboard import show_dashboard
     show_dashboard()
 
 elif page == "payment_list":
-    from pages.payment_list import show_payment_list
+    from views.payment_list import show_payment_list
     show_payment_list()
 
 elif page == "settings":
-    from pages.settings_page import show_settings
+    from views.settings_page import show_settings
     show_settings()
