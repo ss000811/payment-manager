@@ -2,6 +2,7 @@
 支払い管理システム Ver.1.0
 メインエントリポイント
 """
+import os
 import sys
 from pathlib import Path
 
@@ -43,6 +44,21 @@ load_css()
 # ─── DB初期化 ───────────────────────────────────────────────
 
 init_db()
+
+# ─── クラウド環境の検出・警告 ────────────────────────────────
+
+def _is_cloud() -> bool:
+    """Streamlit Community Cloud 上で動作しているかを判定する"""
+    return os.environ.get("HOME", "") == "/home/appuser"
+
+if _is_cloud():
+    st.warning(
+        "**クラウドデモ版で動作しています。**  \n"
+        "Streamlit Community Cloud ではデータはサーバーのメモリに保存されます。"
+        "アプリがスリープ状態になるとデータは消去されます。  \n"
+        "本番運用では [ローカル版](https://github.com/ss000811/payment-manager) をご利用ください。",
+        icon="⚠️",
+    )
 
 # ─── セッション初期化 ────────────────────────────────────────
 
