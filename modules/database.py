@@ -9,45 +9,73 @@ def init_db():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT    NOT NULL,
+                email         TEXT    NOT NULL UNIQUE,
+                password_hash TEXT    NOT NULL,
+                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS payments (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                year        INTEGER NOT NULL,
-                month       INTEGER NOT NULL,
-                payee       TEXT    NOT NULL,
-                description TEXT    NOT NULL DEFAULT '',
-                payment_type TEXT   NOT NULL DEFAULT 'fixed',
-                payment_day INTEGER,
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER NOT NULL DEFAULT 0,
+                year          INTEGER NOT NULL,
+                month         INTEGER NOT NULL,
+                payee         TEXT    NOT NULL,
+                description   TEXT    NOT NULL DEFAULT '',
+                payment_type  TEXT    NOT NULL DEFAULT 'fixed',
+                payment_day   INTEGER,
                 adjusted_date TEXT,
-                amount      REAL    DEFAULT 0,
-                payment_method TEXT DEFAULT '',
-                status      TEXT    DEFAULT 'unpaid',
-                category    TEXT    DEFAULT '',
-                notes       TEXT    DEFAULT '',
-                created_at  TEXT    DEFAULT CURRENT_TIMESTAMP,
-                updated_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+                amount        REAL    DEFAULT 0,
+                payment_method TEXT   DEFAULT '',
+                status        TEXT    DEFAULT 'unpaid',
+                category      TEXT    DEFAULT '',
+                notes         TEXT    DEFAULT '',
+                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP,
+                updated_at    TEXT    DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS payment_templates (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                payee        TEXT    NOT NULL,
-                description  TEXT    DEFAULT '',
-                payment_type TEXT    NOT NULL DEFAULT 'fixed',
-                payment_day  INTEGER,
-                amount       REAL    DEFAULT 0,
-                payment_method TEXT  DEFAULT '',
-                category     TEXT    DEFAULT '',
-                notes        TEXT    DEFAULT '',
-                is_active    INTEGER DEFAULT 1,
-                created_at   TEXT    DEFAULT CURRENT_TIMESTAMP
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                payee         TEXT    NOT NULL,
+                description   TEXT    DEFAULT '',
+                payment_type  TEXT    NOT NULL DEFAULT 'fixed',
+                payment_day   INTEGER,
+                amount        REAL    DEFAULT 0,
+                payment_method TEXT   DEFAULT '',
+                category      TEXT    DEFAULT '',
+                notes         TEXT    DEFAULT '',
+                is_active     INTEGER DEFAULT 1,
+                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE INDEX IF NOT EXISTS idx_payments_ym
-                ON payments(year, month);
             CREATE INDEX IF NOT EXISTS idx_payments_status
                 ON payments(status);
             CREATE INDEX IF NOT EXISTS idx_payments_payee
                 ON payments(payee);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+                ON users(email);
         """)
+    # マイグレーション後に user_id 依存インデックスを作成
+    _migrate()
+    with get_connection() as conn:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_user_ym"
+            " ON payments(user_id, year, month)"
+        )
+
+
+def _migrate():
+    """スキーママイグレーション: 既存テーブルに列が不足している場合に追加"""
+    with get_connection() as conn:
+        existing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(payments)").fetchall()
+        }
+        if "user_id" not in existing_cols:
+            conn.execute(
+                "ALTER TABLE payments ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0"
+            )
 
 
 @contextmanager
@@ -70,11 +98,11 @@ def get_connection():
 def add_payment(data: dict) -> int:
     sql = """
         INSERT INTO payments
-            (year, month, payee, description, payment_type,
+            (user_id, year, month, payee, description, payment_type,
              payment_day, adjusted_date, amount, payment_method,
              status, category, notes)
         VALUES
-            (:year, :month, :payee, :description, :payment_type,
+            (:user_id, :year, :month, :payee, :description, :payment_type,
              :payment_day, :adjusted_date, :amount, :payment_method,
              :status, :category, :notes)
     """
@@ -99,29 +127,33 @@ def update_payment(payment_id: int, data: dict) -> None:
             category       = :category,
             notes          = :notes,
             updated_at     = :updated_at
-        WHERE id = :id
+        WHERE id = :id AND user_id = :user_id
     """
     with get_connection() as conn:
         conn.execute(sql, data)
 
 
-def update_payment_status(payment_id: int, status: str) -> None:
+def update_payment_status(payment_id: int, status: str, user_id: int) -> None:
     with get_connection() as conn:
         conn.execute(
-            "UPDATE payments SET status=?, updated_at=? WHERE id=?",
-            (status, datetime.now().isoformat(), payment_id),
+            "UPDATE payments SET status=?, updated_at=? WHERE id=? AND user_id=?",
+            (status, datetime.now().isoformat(), payment_id, user_id),
         )
 
 
-def delete_payment(payment_id: int) -> None:
+def delete_payment(payment_id: int, user_id: int) -> None:
     with get_connection() as conn:
-        conn.execute("DELETE FROM payments WHERE id=?", (payment_id,))
+        conn.execute(
+            "DELETE FROM payments WHERE id=? AND user_id=?",
+            (payment_id, user_id),
+        )
 
 
-def get_payment(payment_id: int) -> dict | None:
+def get_payment(payment_id: int, user_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM payments WHERE id=?", (payment_id,)
+            "SELECT * FROM payments WHERE id=? AND user_id=?",
+            (payment_id, user_id),
         ).fetchone()
     return dict(row) if row else None
 
@@ -129,13 +161,14 @@ def get_payment(payment_id: int) -> dict | None:
 def get_payments_df(
     year: int,
     month: int,
+    user_id: int,
     status_filter: str = "all",
     search: str = "",
     sort_col: str = "adjusted_date",
     sort_asc: bool = True,
 ) -> pd.DataFrame:
-    where_clauses = ["year=? AND month=?"]
-    params: list = [year, month]
+    where_clauses = ["year=? AND month=? AND user_id=?"]
+    params: list = [year, month, user_id]
 
     if status_filter == "unpaid":
         where_clauses.append("status='unpaid'")
@@ -169,7 +202,7 @@ def get_payments_df(
 
     sql = f"""
         SELECT
-            id, year, month, payee, description, payment_type,
+            id, user_id, year, month, payee, description, payment_type,
             payment_day, adjusted_date, amount, payment_method,
             status, category, notes, created_at, updated_at
         FROM payments
@@ -181,27 +214,28 @@ def get_payments_df(
     return df
 
 
-def get_all_payees() -> list[str]:
+def get_all_payees(user_id: int) -> list[str]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT payee FROM payments ORDER BY payee"
+            "SELECT DISTINCT payee FROM payments WHERE user_id=? ORDER BY payee",
+            (user_id,),
         ).fetchall()
     return [r[0] for r in rows]
 
 
-def get_all_categories() -> list[str]:
+def get_all_categories(user_id: int) -> list[str]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT category FROM payments WHERE category != '' ORDER BY category"
+            "SELECT DISTINCT category FROM payments WHERE user_id=? AND category != '' ORDER BY category",
+            (user_id,),
         ).fetchall()
     return [r[0] for r in rows]
 
 
 # ─── ダッシュボード集計 ────────────────────────────────────────
 
-def get_dashboard_stats(year: int, month: int) -> dict:
+def get_dashboard_stats(year: int, month: int, user_id: int) -> dict:
     today = date.today().isoformat()
-    week_start = date.today().isoformat()
     from datetime import timedelta
     week_end = (date.today() + timedelta(days=6)).isoformat()
 
@@ -210,46 +244,23 @@ def get_dashboard_stats(year: int, month: int) -> dict:
             row = conn.execute(sql, params).fetchone()
             return row[0] if row and row[0] is not None else 0
 
-        total_count = scalar(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=?",
-            (year, month),
-        )
-        total_amount = scalar(
-            "SELECT SUM(amount) FROM payments WHERE year=? AND month=?",
-            (year, month),
-        )
-        paid_amount = scalar(
-            "SELECT SUM(amount) FROM payments WHERE year=? AND month=? AND status='paid'",
-            (year, month),
-        )
-        unpaid_count = scalar(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=? AND status='unpaid'",
-            (year, month),
-        )
-        unpaid_amount = scalar(
-            "SELECT SUM(amount) FROM payments WHERE year=? AND month=? AND status='unpaid'",
-            (year, month),
-        )
+        base = "FROM payments WHERE user_id=? AND year=? AND month=?"
+        p = (user_id, year, month)
+
+        total_count   = scalar(f"SELECT COUNT(*) {base}", p)
+        total_amount  = scalar(f"SELECT SUM(amount) {base}", p)
+        paid_amount   = scalar(f"SELECT SUM(amount) {base} AND status='paid'", p)
+        paid_count    = scalar(f"SELECT COUNT(*) {base} AND status='paid'", p)
+        unpaid_count  = scalar(f"SELECT COUNT(*) {base} AND status='unpaid'", p)
+        unpaid_amount = scalar(f"SELECT SUM(amount) {base} AND status='unpaid'", p)
         overdue_count = scalar(
-            f"SELECT COUNT(*) FROM payments WHERE year=? AND month=? AND status='unpaid' AND adjusted_date < '{today}'",
-            (year, month),
+            f"SELECT COUNT(*) {base} AND status='unpaid' AND adjusted_date < '{today}'", p
         )
         this_week_count = scalar(
-            f"SELECT COUNT(*) FROM payments WHERE year=? AND month=? AND adjusted_date >= '{week_start}' AND adjusted_date <= '{week_end}'",
-            (year, month),
+            f"SELECT COUNT(*) {base} AND adjusted_date >= '{today}' AND adjusted_date <= '{week_end}'", p
         )
-        fixed_count = scalar(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=? AND payment_type='fixed'",
-            (year, month),
-        )
-        variable_count = scalar(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=? AND payment_type='variable'",
-            (year, month),
-        )
-        paid_count = scalar(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=? AND status='paid'",
-            (year, month),
-        )
+        fixed_count    = scalar(f"SELECT COUNT(*) {base} AND payment_type='fixed'", p)
+        variable_count = scalar(f"SELECT COUNT(*) {base} AND payment_type='variable'", p)
 
     return {
         "total_count": total_count,
@@ -265,7 +276,7 @@ def get_dashboard_stats(year: int, month: int) -> dict:
     }
 
 
-def get_monthly_summary(year: int) -> pd.DataFrame:
+def get_monthly_summary(year: int, user_id: int) -> pd.DataFrame:
     sql = """
         SELECT
             month,
@@ -274,113 +285,57 @@ def get_monthly_summary(year: int) -> pd.DataFrame:
             SUM(CASE WHEN status='paid' THEN amount ELSE 0 END) as paid,
             SUM(CASE WHEN status='unpaid' THEN amount ELSE 0 END) as unpaid
         FROM payments
-        WHERE year=?
+        WHERE user_id=? AND year=?
         GROUP BY month
         ORDER BY month
     """
     with get_connection() as conn:
-        return pd.read_sql_query(sql, conn, params=(year,))
+        return pd.read_sql_query(sql, conn, params=(user_id, year))
 
 
-def get_all_payments_df(year: int) -> pd.DataFrame:
+def get_all_payments_df(year: int, user_id: int) -> pd.DataFrame:
     sql = """
-        SELECT * FROM payments WHERE year=?
+        SELECT * FROM payments WHERE user_id=? AND year=?
         ORDER BY month, adjusted_date, id
     """
     with get_connection() as conn:
-        return pd.read_sql_query(sql, conn, params=(year,))
+        return pd.read_sql_query(sql, conn, params=(user_id, year))
 
 
 # ─── 翌月繰り越し ───────────────────────────────────────────────
 
-def rollover_to_next_month(year: int, month: int, include_variable: bool = False) -> int:
-    from modules.holiday import adjust_payment_date
-
-    if month == 12:
-        next_year, next_month = year + 1, 1
-    else:
-        next_year, next_month = year, month + 1
-
-    # 次月にすでにデータがある場合はスキップ
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=?",
-            (next_year, next_month),
-        ).fetchone()[0]
-
-    if existing > 0:
-        return 0
-
-    with get_connection() as conn:
-        if include_variable:
-            rows = conn.execute(
-                "SELECT * FROM payments WHERE year=? AND month=?",
-                (year, month),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM payments WHERE year=? AND month=? AND payment_type='fixed'",
-                (year, month),
-            ).fetchall()
-
-    count = 0
-    for row in rows:
-        r = dict(row)
-        adj = adjust_payment_date(next_year, next_month, r.get("payment_day") or 1)
-        data = {
-            "year": next_year,
-            "month": next_month,
-            "payee": r["payee"],
-            "description": r["description"],
-            "payment_type": r["payment_type"],
-            "payment_day": r["payment_day"],
-            "adjusted_date": adj.isoformat() if adj else None,
-            "amount": r["amount"],
-            "payment_method": r["payment_method"],
-            "status": "unpaid",
-            "category": r["category"],
-            "notes": r["notes"],
-        }
-        add_payment(data)
-        count += 1
-
-    return count
-
-
-def get_rollover_candidates(year: int, month: int) -> pd.DataFrame:
-    """翌月繰り越し対象（固定・固定変動）を返す"""
+def get_rollover_candidates(year: int, month: int, user_id: int) -> pd.DataFrame:
     from config.settings import ROLLOVER_TYPES
     placeholders = ",".join("?" * len(ROLLOVER_TYPES))
     sql = f"""
         SELECT * FROM payments
-        WHERE year=? AND month=?
+        WHERE user_id=? AND year=? AND month=?
           AND payment_type IN ({placeholders})
         ORDER BY adjusted_date, payee
     """
     with get_connection() as conn:
-        return pd.read_sql_query(sql, conn, params=(year, month, *ROLLOVER_TYPES))
+        return pd.read_sql_query(
+            sql, conn, params=(user_id, year, month, *ROLLOVER_TYPES)
+        )
 
 
-def check_next_month_exists(next_year: int, next_month: int) -> int:
-    """翌月の既存データ件数を返す"""
+def check_next_month_exists(next_year: int, next_month: int, user_id: int) -> int:
     with get_connection() as conn:
         return conn.execute(
-            "SELECT COUNT(*) FROM payments WHERE year=? AND month=?",
-            (next_year, next_month),
+            "SELECT COUNT(*) FROM payments WHERE user_id=? AND year=? AND month=?",
+            (user_id, next_year, next_month),
         ).fetchone()[0]
 
 
-def execute_rollover(next_year: int, next_month: int, items: list[dict]) -> int:
-    """
-    確認済みのアイテムリストを翌月に登録する。
-    items: {"payee", "description", "payment_type", "payment_day",
-             "amount", "payment_method", "category", "notes"} の dict リスト
-    """
+def execute_rollover(
+    next_year: int, next_month: int, items: list[dict], user_id: int
+) -> int:
     from modules.holiday import adjust_payment_date
     count = 0
     for item in items:
         adj = adjust_payment_date(next_year, next_month, item.get("payment_day") or 1)
         data = {
+            "user_id": user_id,
             "year": next_year,
             "month": next_month,
             "payee": item["payee"],

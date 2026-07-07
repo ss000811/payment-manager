@@ -6,7 +6,7 @@ BACKUP_DIR = BASE_DIR / "backups"
 DB_PATH = DATA_DIR / "payments.db"
 
 APP_NAME = "支払い管理システム"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
 PAYMENT_METHODS = [
     "銀行振込",

@@ -1,12 +1,11 @@
 """
-支払い管理システム Ver.1.0
+支払い管理システム Ver.2.0
 メインエントリポイント
 """
 import os
 import sys
 from pathlib import Path
 
-# プロジェクトルートをPATHに追加（相対インポートのため）
 ROOT = Path(__file__).parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -37,7 +36,10 @@ st.set_page_config(
 def load_css():
     css_path = ROOT / "assets" / "style.css"
     if css_path.exists():
-        st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+        st.markdown(
+            f"<style>{css_path.read_text(encoding='utf-8')}</style>",
+            unsafe_allow_html=True,
+        )
 
 load_css()
 
@@ -48,28 +50,34 @@ init_db()
 # ─── クラウド環境の検出・警告 ────────────────────────────────
 
 def _is_cloud() -> bool:
-    """Streamlit Community Cloud 上で動作しているかを判定する"""
     return os.environ.get("HOME", "") == "/home/appuser"
 
 if _is_cloud():
     st.warning(
         "**クラウドデモ版で動作しています。**  \n"
-        "Streamlit Community Cloud ではデータはサーバーのメモリに保存されます。"
-        "アプリがスリープ状態になるとデータは消去されます。  \n"
+        "Streamlit Community Cloud ではアプリがスリープすると"
+        "データ（ユーザーアカウント・支払いデータ）が消去されます。  \n"
         "本番運用では [ローカル版](https://github.com/ss000811/payment-manager) をご利用ください。",
         icon="⚠️",
     )
 
-# ─── セッション初期化 ────────────────────────────────────────
+# ─── 未ログイン時はログイン画面のみ表示 ────────────────────────
+
+if "user_id" not in st.session_state:
+    from views.login import show_login
+    show_login()
+    st.stop()
+
+# ─── セッション初期化（ログイン済みの場合のみ） ────────────────
 
 if "view_year" not in st.session_state or "view_month" not in st.session_state:
     y, m = get_current_year_month()
-    st.session_state.setdefault("view_year", y)
+    st.session_state.setdefault("view_year",  y)
     st.session_state.setdefault("view_month", m)
 
 st.session_state.setdefault("current_page", "dashboard")
-st.session_state.setdefault("selected_id", None)
-st.session_state.setdefault("refresh", False)
+st.session_state.setdefault("selected_id",  None)
+st.session_state.setdefault("refresh",      False)
 
 if st.session_state.get("refresh"):
     st.session_state["refresh"] = False
@@ -92,13 +100,40 @@ with st.sidebar:
 
     st.divider()
 
+    # ─ ログインユーザー情報
+    user_name  = st.session_state.get("user_name",  "")
+    user_email = st.session_state.get("user_email", "")
+    st.markdown(
+        f"""
+        <div style="background:rgba(255,255,255,0.12); border-radius:8px;
+                    padding:10px 12px; margin-bottom:8px;">
+            <div style="color:#fff; font-size:13px; font-weight:600;">👤 {user_name}</div>
+            <div style="color:rgba(255,255,255,0.55); font-size:11px; margin-top:2px;">
+                {user_email}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ─ ログアウトボタン
+    if st.button("🚪 ログアウト", use_container_width=True):
+        for key in ["user_id", "user_name", "user_email",
+                    "view_year", "view_month", "tbl_gen",
+                    "del_id", "del_payee", "del_amount",
+                    "toast_msg", "refresh", "current_page", "selected_id"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+    st.divider()
+
     page = st.radio(
         "ナビゲーション",
         options=["dashboard", "payment_list", "settings"],
         format_func=lambda x: {
-            "dashboard": "📊 ダッシュボード",
+            "dashboard":    "📊 ダッシュボード",
             "payment_list": "📋 支払い管理",
-            "settings": "⚙️ 設定・バックアップ",
+            "settings":     "⚙️ 設定・バックアップ",
         }[x],
         label_visibility="collapsed",
         key="nav_page",
@@ -106,7 +141,7 @@ with st.sidebar:
 
     st.divider()
 
-    # 現在の表示月
+    # ─ 現在の表示月
     vy = st.session_state.get("view_year")
     vm = st.session_state.get("view_month")
     st.markdown(
@@ -118,23 +153,20 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # 今月に戻る
-    from utils.helpers import get_current_year_month
     cy, cm = get_current_year_month()
     if (vy, vm) != (cy, cm):
         if st.button("📅 今月に戻る", use_container_width=True):
-            st.session_state["view_year"] = cy
+            st.session_state["view_year"]  = cy
             st.session_state["view_month"] = cm
             st.rerun()
 
     st.divider()
 
-    # クイック自動バックアップボタン
     if st.button("💾 バックアップ作成", use_container_width=True):
         from modules.backup import create_backup
         try:
-            fname = create_backup("手動バックアップ")
-            st.success(f"✅ 保存完了")
+            create_backup("手動バックアップ")
+            st.success("✅ 保存完了")
         except Exception as e:
             st.error(f"❌ {e}")
 

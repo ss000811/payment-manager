@@ -18,6 +18,8 @@ from config.settings import APP_NAME, APP_VERSION
 
 
 def show_settings():
+    user_id = st.session_state["user_id"]
+
     st.markdown("## ⚙️ 設定・バックアップ・インポート")
 
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -87,9 +89,16 @@ def show_settings():
         year, month = get_current_year_month()
         col_y, col_m = st.columns(2)
         with col_y:
-            import_year = st.selectbox("取込先 年", range(2020, 2031), index=list(range(2020, 2031)).index(year))
+            import_year = st.selectbox(
+                "取込先 年", range(2020, 2031),
+                index=list(range(2020, 2031)).index(year),
+            )
         with col_m:
-            import_month = st.selectbox("取込先 月", range(1, 13), index=month - 1, format_func=lambda m: f"{m}月")
+            import_month = st.selectbox(
+                "取込先 月", range(1, 13),
+                index=month - 1,
+                format_func=lambda m: f"{m}月",
+            )
 
         st.markdown("#### テンプレートダウンロード")
         template_csv = get_import_template_csv()
@@ -101,13 +110,10 @@ def show_settings():
         )
 
         st.markdown("#### CSVファイルをアップロード")
-        st.caption(
-            "列名：支払先、支払内容、固定変動（固定/変動）、支払日（日）、金額、支払方法、カテゴリ、備考"
-        )
+        st.caption("列名：支払先、支払内容、固定変動（固定/変動）、支払日（日）、金額、支払方法、カテゴリ、備考")
 
         uploaded = st.file_uploader(
-            "CSVファイルを選択",
-            type=["csv"],
+            "CSVファイルを選択", type=["csv"],
             help="UTF-8またはShift-JIS形式のCSVファイルに対応しています",
         )
 
@@ -127,8 +133,8 @@ def show_settings():
             if payments:
                 st.success(f"✅ {len(payments)} 件のデータを読み込みました。")
                 preview_df = pd.DataFrame(payments)[
-                    ["payee", "description", "payment_type", "payment_day", "amount",
-                     "payment_method", "category", "adjusted_date"]
+                    ["payee", "description", "payment_type", "payment_day",
+                     "amount", "payment_method", "category", "adjusted_date"]
                 ].copy()
                 preview_df.columns = ["支払先", "支払内容", "固定変動", "支払日",
                                        "金額", "支払方法", "カテゴリ", "調整後支払日"]
@@ -138,10 +144,13 @@ def show_settings():
                     f"▶ {import_year}年{import_month}月にインポートする",
                     type="primary",
                 ):
+                    # ログイン中ユーザーの user_id を付加する
+                    for p in payments:
+                        p["user_id"] = user_id
                     with st.spinner("インポート中..."):
                         count = bulk_insert_payments(payments)
                     st.success(f"✅ {count} 件をインポートしました！")
-                    st.session_state["view_year"] = import_year
+                    st.session_state["view_year"]  = import_year
                     st.session_state["view_month"] = import_month
                     st.balloons()
             else:
@@ -155,13 +164,25 @@ def show_settings():
         year, month = get_current_year_month()
         col_ey, col_em = st.columns(2)
         with col_ey:
-            exp_year = st.selectbox("出力 年", range(2020, 2031), index=list(range(2020, 2031)).index(year), key="exp_year")
+            exp_year = st.selectbox(
+                "出力 年", range(2020, 2031),
+                index=list(range(2020, 2031)).index(year),
+                key="exp_year",
+            )
         with col_em:
-            exp_month = st.selectbox("出力 月", range(1, 13), index=month - 1, format_func=lambda m: f"{m}月", key="exp_month")
+            exp_month = st.selectbox(
+                "出力 月", range(1, 13),
+                index=month - 1,
+                format_func=lambda m: f"{m}月",
+                key="exp_month",
+            )
 
-        df_exp = get_payments_df(exp_year, exp_month)
+        df_exp = get_payments_df(exp_year, exp_month, user_id)
         if not df_exp.empty:
-            st.info(f"{exp_year}年{exp_month}月：{len(df_exp)} 件　合計 {format_currency(df_exp['amount'].sum())}")
+            st.info(
+                f"{exp_year}年{exp_month}月：{len(df_exp)} 件　"
+                f"合計 {format_currency(df_exp['amount'].sum())}"
+            )
             csv_data = export_to_csv(df_exp)
             st.download_button(
                 f"📄 {exp_year}年{exp_month}月をCSV出力",
@@ -175,7 +196,7 @@ def show_settings():
 
         st.divider()
         st.markdown("#### 年間データ一括出力")
-        df_all = get_all_payments_df(exp_year)
+        df_all = get_all_payments_df(exp_year, user_id)
         if not df_all.empty:
             csv_all = export_to_csv(df_all)
             st.download_button(
@@ -189,15 +210,16 @@ def show_settings():
 
     with tab4:
         st.markdown("### ℹ️ システム情報")
-        import streamlit as st_ver
         from config.settings import DB_PATH, BACKUP_DIR
 
         info_rows = [
-            ("アプリ名", APP_NAME),
-            ("バージョン", APP_VERSION),
-            ("Streamlit バージョン", st_ver.__version__),
-            ("データベースファイル", str(DB_PATH)),
-            ("バックアップフォルダ", str(BACKUP_DIR)),
+            ("アプリ名",              APP_NAME),
+            ("バージョン",            APP_VERSION),
+            ("Streamlit バージョン",  st.__version__),
+            ("データベースファイル",  str(DB_PATH)),
+            ("バックアップフォルダ",  str(BACKUP_DIR)),
+            ("ログインユーザー",      st.session_state.get("user_name", "")),
+            ("メールアドレス",        st.session_state.get("user_email", "")),
         ]
 
         for label, value in info_rows:
