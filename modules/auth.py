@@ -1,82 +1,58 @@
-"""ユーザー認証モジュール"""
-import hashlib
-import os
-from datetime import datetime
-
-from modules.database import get_connection
-
-
-def hash_password(password: str) -> str:
-    """パスワードをソルト付き PBKDF2-SHA256 ハッシュに変換"""
-    salt = os.urandom(32)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100_000)
-    return salt.hex() + ":" + key.hex()
-
-
-def verify_password(password: str, password_hash: str) -> bool:
-    """平文パスワードとハッシュを照合する"""
-    try:
-        salt_hex, key_hex = password_hash.split(":", 1)
-        salt = bytes.fromhex(salt_hex)
-        key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100_000)
-        return key.hex() == key_hex
-    except Exception:
-        return False
+"""Supabase Auth を使ったユーザー認証"""
+from modules.supabase_client import get_supabase
 
 
 def register_user(name: str, email: str, password: str) -> tuple[bool, str]:
-    """
-    新規ユーザーを登録する。
-    Returns: (success, message)
-    """
-    name = name.strip()
-    email = email.strip().lower()
-
-    if not name:
+    if not name.strip():
         return False, "名前を入力してください"
-    if not email or "@" not in email or "." not in email.split("@")[-1]:
-        return False, "有効なメールアドレスを入力してください"
     if len(password) < 8:
         return False, "パスワードは8文字以上で入力してください"
 
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT id FROM users WHERE email = ?", (email,)
-        ).fetchone()
-        if existing:
+    client = get_supabase()
+    try:
+        response = client.auth.sign_up({
+            "email": email.strip(),
+            "password": password,
+            "options": {"data": {"name": name.strip()}},
+        })
+        if response.user:
+            if response.session is None:
+                return True, "確認メールを送信しました。メールのリンクをクリックしてからログインしてください。"
+            return True, "登録が完了しました"
+        return False, "登録に失敗しました"
+    except Exception as e:
+        msg = str(e)
+        if "already registered" in msg or "already exists" in msg or "User already registered" in msg:
             return False, "このメールアドレスはすでに登録されています"
-
-        conn.execute(
-            """
-            INSERT INTO users (name, email, password_hash, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (name, email, hash_password(password), datetime.now().isoformat()),
-        )
-    return True, "登録が完了しました"
+        return False, f"登録エラー: {msg}"
 
 
 def login_user(email: str, password: str) -> tuple[bool, dict | None, str]:
-    """
-    メール・パスワードで認証する。
-    Returns: (success, user_dict, message)
-    """
-    email = email.strip().lower()
-
-    if not email or not password:
+    if not email.strip() or not password:
         return False, None, "メールアドレスとパスワードを入力してください"
 
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT id, name, email, password_hash FROM users WHERE email = ?",
-            (email,),
-        ).fetchone()
-
-    if not row:
-        return False, None, "メールアドレスまたはパスワードが正しくありません"
-
-    user = dict(row)
-    if not verify_password(password, user["password_hash"]):
-        return False, None, "メールアドレスまたはパスワードが正しくありません"
-
-    return True, {"id": user["id"], "name": user["name"], "email": user["email"]}, "ログインしました"
+    client = get_supabase()
+    try:
+        response = client.auth.sign_in_with_password({
+            "email": email.strip(),
+            "password": password,
+        })
+        if response.session and response.user:
+            user = response.user
+            session = response.session
+            name = (user.user_metadata or {}).get("name", email.split("@")[0])
+            return True, {
+                "id":            user.id,
+                "name":          name,
+                "email":         user.email,
+                "access_token":  session.access_token,
+                "refresh_token": session.refresh_token,
+            }, "ログインしました"
+        return False, None, "ログインに失敗しました"
+    except Exception as e:
+        msg = str(e)
+        if "Email not confirmed" in msg:
+            return False, None, "メールアドレスの確認が完了していません。確認メールのリンクをクリックしてください。"
+        if "Invalid login credentials" in msg or "invalid_credentials" in msg:
+            return False, None, "メールアドレスまたはパスワードが正しくありません"
+        return False, None, f"ログインエラー: {msg}"

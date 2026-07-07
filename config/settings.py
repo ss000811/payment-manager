@@ -1,10 +1,3 @@
-from pathlib import Path
-
-BASE_DIR = Path(__file__).parent.parent
-DATA_DIR = BASE_DIR / "data"
-BACKUP_DIR = BASE_DIR / "backups"
-DB_PATH = DATA_DIR / "payments.db"
-
 APP_NAME = "支払い管理システム"
 APP_VERSION = "2.0.0"
 

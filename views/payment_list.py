@@ -453,7 +453,7 @@ def show_payment_list():
         idx = selected_rows[0]
         if idx < len(df):
             row           = df.iloc[idx]
-            selected_id   = int(row["id"])
+            selected_id   = str(row["id"])
             selected_data = dict(row)
 
     # ─ 選択行アクション

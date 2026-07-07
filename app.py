@@ -53,12 +53,10 @@ def _is_cloud() -> bool:
     return os.environ.get("HOME", "") == "/home/appuser"
 
 if _is_cloud():
-    st.warning(
-        "**クラウドデモ版で動作しています。**  \n"
-        "Streamlit Community Cloud ではアプリがスリープすると"
-        "データ（ユーザーアカウント・支払いデータ）が消去されます。  \n"
-        "本番運用では [ローカル版](https://github.com/ss000811/payment-manager) をご利用ください。",
-        icon="⚠️",
+    st.info(
+        "**Supabase クラウドデータベースで動作しています。**  \n"
+        "データはクラウドに永続保存されます。アプリのスリープ後もデータは保持されます。",
+        icon="☁️",
     )
 
 # ─── 未ログイン時はログイン画面のみ表示 ────────────────────────
@@ -118,7 +116,13 @@ with st.sidebar:
 
     # ─ ログアウトボタン
     if st.button("🚪 ログアウト", use_container_width=True):
+        try:
+            from modules.supabase_client import get_supabase
+            get_supabase().auth.sign_out()
+        except Exception:
+            pass
         for key in ["user_id", "user_name", "user_email",
+                    "access_token", "refresh_token",
                     "view_year", "view_month", "tbl_gen",
                     "del_id", "del_payee", "del_amount",
                     "toast_msg", "refresh", "current_page", "selected_id"]:
@@ -159,16 +163,6 @@ with st.sidebar:
             st.session_state["view_year"]  = cy
             st.session_state["view_month"] = cm
             st.rerun()
-
-    st.divider()
-
-    if st.button("💾 バックアップ作成", use_container_width=True):
-        from modules.backup import create_backup
-        try:
-            create_backup("手動バックアップ")
-            st.success("✅ 保存完了")
-        except Exception as e:
-            st.error(f"❌ {e}")
 
     st.markdown(
         """

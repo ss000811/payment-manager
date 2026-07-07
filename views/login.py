@@ -50,9 +50,11 @@ def _login_form():
         with st.spinner("認証中..."):
             ok, user, msg = login_user(email, password)
         if ok:
-            st.session_state["user_id"]    = user["id"]
-            st.session_state["user_name"]  = user["name"]
-            st.session_state["user_email"] = user["email"]
+            st.session_state["user_id"]       = user["id"]
+            st.session_state["user_name"]     = user["name"]
+            st.session_state["user_email"]    = user["email"]
+            st.session_state["access_token"]  = user["access_token"]
+            st.session_state["refresh_token"] = user["refresh_token"]
             st.rerun()
         else:
             st.error(f"❌ {msg}")

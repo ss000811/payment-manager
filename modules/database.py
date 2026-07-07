@@ -1,396 +1,320 @@
-import sqlite3
+"""Supabase を使った支払いデータ CRUD"""
 import pandas as pd
-from contextlib import contextmanager
 from datetime import date, datetime
-from config.settings import DB_PATH, DATA_DIR
+
+from modules.supabase_client import get_supabase
+
+PAYMENT_INSERT_FIELDS = [
+    "user_id", "year", "month", "payee", "description", "payment_type",
+    "payment_day", "adjusted_date", "amount", "payment_method",
+    "status", "category", "notes",
+]
 
 
 def init_db():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with get_connection() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS users (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                name          TEXT    NOT NULL,
-                email         TEXT    NOT NULL UNIQUE,
-                password_hash TEXT    NOT NULL,
-                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS payments (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id       INTEGER NOT NULL DEFAULT 0,
-                year          INTEGER NOT NULL,
-                month         INTEGER NOT NULL,
-                payee         TEXT    NOT NULL,
-                description   TEXT    NOT NULL DEFAULT '',
-                payment_type  TEXT    NOT NULL DEFAULT 'fixed',
-                payment_day   INTEGER,
-                adjusted_date TEXT,
-                amount        REAL    DEFAULT 0,
-                payment_method TEXT   DEFAULT '',
-                status        TEXT    DEFAULT 'unpaid',
-                category      TEXT    DEFAULT '',
-                notes         TEXT    DEFAULT '',
-                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP,
-                updated_at    TEXT    DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS payment_templates (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                payee         TEXT    NOT NULL,
-                description   TEXT    DEFAULT '',
-                payment_type  TEXT    NOT NULL DEFAULT 'fixed',
-                payment_day   INTEGER,
-                amount        REAL    DEFAULT 0,
-                payment_method TEXT   DEFAULT '',
-                category      TEXT    DEFAULT '',
-                notes         TEXT    DEFAULT '',
-                is_active     INTEGER DEFAULT 1,
-                created_at    TEXT    DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_payments_status
-                ON payments(status);
-            CREATE INDEX IF NOT EXISTS idx_payments_payee
-                ON payments(payee);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
-                ON users(email);
-        """)
-    # マイグレーション後に user_id 依存インデックスを作成
-    _migrate()
-    with get_connection() as conn:
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_payments_user_ym"
-            " ON payments(user_id, year, month)"
-        )
-
-
-def _migrate():
-    """スキーママイグレーション: 既存テーブルに列が不足している場合に追加"""
-    with get_connection() as conn:
-        existing_cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(payments)").fetchall()
-        }
-        if "user_id" not in existing_cols:
-            conn.execute(
-                "ALTER TABLE payments ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0"
-            )
-
-
-@contextmanager
-def get_connection():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    """Supabase 接続確認（旧 SQLite 初期化の互換ラッパー）"""
+    import streamlit as st
     try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+        get_supabase()
+    except ValueError as e:
+        st.error(f"❌ Supabase 接続設定エラー：{e}")
+        st.code(
+            "# .streamlit/secrets.toml に以下を追加してください:\n"
+            'SUPABASE_URL = "https://your-project.supabase.co"\n'
+            'SUPABASE_ANON_KEY = "your-anon-key"'
+        )
+        st.stop()
 
 
 # ─── 支払いCRUD ──────────────────────────────────────────────
 
-def add_payment(data: dict) -> int:
-    sql = """
-        INSERT INTO payments
-            (user_id, year, month, payee, description, payment_type,
-             payment_day, adjusted_date, amount, payment_method,
-             status, category, notes)
-        VALUES
-            (:user_id, :year, :month, :payee, :description, :payment_type,
-             :payment_day, :adjusted_date, :amount, :payment_method,
-             :status, :category, :notes)
-    """
-    with get_connection() as conn:
-        cur = conn.execute(sql, data)
-        return cur.lastrowid
+def add_payment(data: dict) -> str:
+    client = get_supabase()
+    insert = {k: data[k] for k in PAYMENT_INSERT_FIELDS if k in data}
+    response = client.table("payments").insert(insert).execute()
+    return response.data[0]["id"] if response.data else None
 
 
-def update_payment(payment_id: int, data: dict) -> None:
-    data["id"] = payment_id
-    data["updated_at"] = datetime.now().isoformat()
-    sql = """
-        UPDATE payments SET
-            payee          = :payee,
-            description    = :description,
-            payment_type   = :payment_type,
-            payment_day    = :payment_day,
-            adjusted_date  = :adjusted_date,
-            amount         = :amount,
-            payment_method = :payment_method,
-            status         = :status,
-            category       = :category,
-            notes          = :notes,
-            updated_at     = :updated_at
-        WHERE id = :id AND user_id = :user_id
-    """
-    with get_connection() as conn:
-        conn.execute(sql, data)
+def update_payment(payment_id: str, data: dict) -> None:
+    client = get_supabase()
+    update = {k: data[k] for k in PAYMENT_INSERT_FIELDS if k in data and k != "user_id"}
+    update["updated_at"] = datetime.now().isoformat()
+    client.table("payments").update(update).eq("id", payment_id).execute()
 
 
-def update_payment_status(payment_id: int, status: str, user_id: int) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            "UPDATE payments SET status=?, updated_at=? WHERE id=? AND user_id=?",
-            (status, datetime.now().isoformat(), payment_id, user_id),
-        )
+def update_payment_status(payment_id: str, status: str, user_id: str) -> None:
+    client = get_supabase()
+    client.table("payments")\
+        .update({"status": status, "updated_at": datetime.now().isoformat()})\
+        .eq("id", payment_id)\
+        .eq("user_id", user_id)\
+        .execute()
 
 
-def delete_payment(payment_id: int, user_id: int) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            "DELETE FROM payments WHERE id=? AND user_id=?",
-            (payment_id, user_id),
-        )
+def delete_payment(payment_id: str, user_id: str) -> None:
+    client = get_supabase()
+    client.table("payments")\
+        .delete()\
+        .eq("id", payment_id)\
+        .eq("user_id", user_id)\
+        .execute()
 
 
-def get_payment(payment_id: int, user_id: int) -> dict | None:
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM payments WHERE id=? AND user_id=?",
-            (payment_id, user_id),
-        ).fetchone()
-    return dict(row) if row else None
+def get_payment(payment_id: str, user_id: str) -> dict | None:
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("*")
+        .eq("id", payment_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return response.data[0] if response.data else None
 
 
 def get_payments_df(
     year: int,
     month: int,
-    user_id: int,
+    user_id: str,
     status_filter: str = "all",
     search: str = "",
     sort_col: str = "adjusted_date",
     sort_asc: bool = True,
 ) -> pd.DataFrame:
-    where_clauses = ["year=? AND month=? AND user_id=?"]
-    params: list = [year, month, user_id]
+    client = get_supabase()
+    query = (
+        client.table("payments")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("year", year)
+        .eq("month", month)
+    )
 
-    if status_filter == "unpaid":
-        where_clauses.append("status='unpaid'")
-    elif status_filter == "paid":
-        where_clauses.append("status='paid'")
-    elif status_filter == "overdue":
-        today = date.today().isoformat()
-        where_clauses.append(f"status='unpaid' AND adjusted_date < '{today}'")
-    elif status_filter == "due_soon":
-        today = date.today().isoformat()
-        from datetime import timedelta
-        soon = (date.today() + timedelta(days=3)).isoformat()
-        where_clauses.append(
-            f"status='unpaid' AND adjusted_date >= '{today}' AND adjusted_date <= '{soon}'"
-        )
+    if status_filter == "paid":
+        query = query.eq("status", "paid")
+    elif status_filter == "unpaid":
+        query = query.eq("status", "unpaid")
 
-    if search:
-        where_clauses.append(
-            "(payee LIKE ? OR description LIKE ? OR category LIKE ?)"
-        )
-        like = f"%{search}%"
-        params += [like, like, like]
-
-    where_sql = " AND ".join(where_clauses)
     valid_cols = {
-        "adjusted_date", "payee", "amount", "status", "payment_day",
-        "payment_type", "category", "payment_method"
+        "adjusted_date", "payee", "amount", "status",
+        "payment_day", "payment_type", "category", "payment_method",
     }
     order_col = sort_col if sort_col in valid_cols else "adjusted_date"
-    order_dir = "ASC" if sort_asc else "DESC"
+    query = query.order(order_col, desc=not sort_asc)
 
-    sql = f"""
-        SELECT
-            id, user_id, year, month, payee, description, payment_type,
-            payment_day, adjusted_date, amount, payment_method,
-            status, category, notes, created_at, updated_at
-        FROM payments
-        WHERE {where_sql}
-        ORDER BY {order_col} {order_dir}, id ASC
-    """
-    with get_connection() as conn:
-        df = pd.read_sql_query(sql, conn, params=params)
-    return df
+    response = query.execute()
+    if not response.data:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(response.data)
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+
+    today = date.today().isoformat()
+    if status_filter == "overdue":
+        adj = df["adjusted_date"].fillna("")
+        df = df[(df["status"] == "unpaid") & (adj < today) & (adj != "")]
+    elif status_filter == "due_soon":
+        from datetime import timedelta
+        soon = (date.today() + timedelta(days=3)).isoformat()
+        adj = df["adjusted_date"].fillna("")
+        df = df[(df["status"] == "unpaid") & (adj >= today) & (adj <= soon)]
+
+    if search:
+        mask = (
+            df["payee"].str.contains(search, case=False, na=False) |
+            df["description"].str.contains(search, case=False, na=False) |
+            df["category"].str.contains(search, case=False, na=False)
+        )
+        df = df[mask]
+
+    return df.reset_index(drop=True)
 
 
-def get_all_payees(user_id: int) -> list[str]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT payee FROM payments WHERE user_id=? ORDER BY payee",
-            (user_id,),
-        ).fetchall()
-    return [r[0] for r in rows]
+def get_all_payees(user_id: str) -> list[str]:
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("payee")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not response.data:
+        return []
+    return sorted(set(r["payee"] for r in response.data if r.get("payee")))
 
 
-def get_all_categories(user_id: int) -> list[str]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT category FROM payments WHERE user_id=? AND category != '' ORDER BY category",
-            (user_id,),
-        ).fetchall()
-    return [r[0] for r in rows]
+def get_all_categories(user_id: str) -> list[str]:
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("category")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not response.data:
+        return []
+    return sorted(set(r["category"] for r in response.data if r.get("category")))
 
 
 # ─── ダッシュボード集計 ────────────────────────────────────────
 
-def get_dashboard_stats(year: int, month: int, user_id: int) -> dict:
-    today = date.today().isoformat()
+def get_dashboard_stats(year: int, month: int, user_id: str) -> dict:
     from datetime import timedelta
+    df = get_payments_df(year, month, user_id)
+
+    zero = {
+        "total_count": 0, "total_amount": 0.0, "paid_amount": 0.0,
+        "paid_count": 0, "unpaid_count": 0, "unpaid_amount": 0.0,
+        "overdue_count": 0, "this_week_count": 0,
+        "fixed_count": 0, "variable_count": 0,
+    }
+    if df.empty:
+        return zero
+
+    today = date.today().isoformat()
     week_end = (date.today() + timedelta(days=6)).isoformat()
+    adj = df["adjusted_date"].fillna("")
 
-    with get_connection() as conn:
-        def scalar(sql, params=()):
-            row = conn.execute(sql, params).fetchone()
-            return row[0] if row and row[0] is not None else 0
-
-        base = "FROM payments WHERE user_id=? AND year=? AND month=?"
-        p = (user_id, year, month)
-
-        total_count   = scalar(f"SELECT COUNT(*) {base}", p)
-        total_amount  = scalar(f"SELECT SUM(amount) {base}", p)
-        paid_amount   = scalar(f"SELECT SUM(amount) {base} AND status='paid'", p)
-        paid_count    = scalar(f"SELECT COUNT(*) {base} AND status='paid'", p)
-        unpaid_count  = scalar(f"SELECT COUNT(*) {base} AND status='unpaid'", p)
-        unpaid_amount = scalar(f"SELECT SUM(amount) {base} AND status='unpaid'", p)
-        overdue_count = scalar(
-            f"SELECT COUNT(*) {base} AND status='unpaid' AND adjusted_date < '{today}'", p
-        )
-        this_week_count = scalar(
-            f"SELECT COUNT(*) {base} AND adjusted_date >= '{today}' AND adjusted_date <= '{week_end}'", p
-        )
-        fixed_count    = scalar(f"SELECT COUNT(*) {base} AND payment_type='fixed'", p)
-        variable_count = scalar(f"SELECT COUNT(*) {base} AND payment_type='variable'", p)
+    paid_m = df["status"] == "paid"
+    unpaid_m = df["status"] == "unpaid"
+    overdue_m = unpaid_m & (adj < today) & (adj != "")
+    week_m = (adj >= today) & (adj <= week_end)
 
     return {
-        "total_count": total_count,
-        "total_amount": total_amount,
-        "paid_amount": paid_amount,
-        "paid_count": paid_count,
-        "unpaid_count": unpaid_count,
-        "unpaid_amount": unpaid_amount,
-        "overdue_count": overdue_count,
-        "this_week_count": this_week_count,
-        "fixed_count": fixed_count,
-        "variable_count": variable_count,
+        "total_count":     len(df),
+        "total_amount":    float(df["amount"].sum()),
+        "paid_amount":     float(df.loc[paid_m, "amount"].sum()),
+        "paid_count":      int(paid_m.sum()),
+        "unpaid_count":    int(unpaid_m.sum()),
+        "unpaid_amount":   float(df.loc[unpaid_m, "amount"].sum()),
+        "overdue_count":   int(overdue_m.sum()),
+        "this_week_count": int(week_m.sum()),
+        "fixed_count":     int((df["payment_type"] == "fixed").sum()),
+        "variable_count":  int((df["payment_type"] == "variable").sum()),
     }
 
 
-def get_monthly_summary(year: int, user_id: int) -> pd.DataFrame:
-    sql = """
-        SELECT
-            month,
-            COUNT(*) as count,
-            SUM(amount) as total,
-            SUM(CASE WHEN status='paid' THEN amount ELSE 0 END) as paid,
-            SUM(CASE WHEN status='unpaid' THEN amount ELSE 0 END) as unpaid
-        FROM payments
-        WHERE user_id=? AND year=?
-        GROUP BY month
-        ORDER BY month
-    """
-    with get_connection() as conn:
-        return pd.read_sql_query(sql, conn, params=(user_id, year))
+def get_monthly_summary(year: int, user_id: str) -> pd.DataFrame:
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("month, amount, status")
+        .eq("user_id", user_id)
+        .eq("year", year)
+        .execute()
+    )
+    if not response.data:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(response.data)
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+
+    rows = []
+    for m in sorted(df["month"].unique()):
+        g = df[df["month"] == m]
+        rows.append({
+            "month":  int(m),
+            "count":  len(g),
+            "total":  float(g["amount"].sum()),
+            "paid":   float(g.loc[g["status"] == "paid",   "amount"].sum()),
+            "unpaid": float(g.loc[g["status"] == "unpaid", "amount"].sum()),
+        })
+    return pd.DataFrame(rows)
 
 
-def get_all_payments_df(year: int, user_id: int) -> pd.DataFrame:
-    sql = """
-        SELECT * FROM payments WHERE user_id=? AND year=?
-        ORDER BY month, adjusted_date, id
-    """
-    with get_connection() as conn:
-        return pd.read_sql_query(sql, conn, params=(user_id, year))
+def get_all_payments_df(year: int, user_id: str) -> pd.DataFrame:
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("year", year)
+        .order("month")
+        .order("adjusted_date")
+        .execute()
+    )
+    if not response.data:
+        return pd.DataFrame()
+    df = pd.DataFrame(response.data)
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    return df
 
 
 # ─── 翌月繰り越し ───────────────────────────────────────────────
 
-def get_rollover_candidates(year: int, month: int, user_id: int) -> pd.DataFrame:
+def get_rollover_candidates(year: int, month: int, user_id: str) -> pd.DataFrame:
     from config.settings import ROLLOVER_TYPES
-    placeholders = ",".join("?" * len(ROLLOVER_TYPES))
-    sql = f"""
-        SELECT * FROM payments
-        WHERE user_id=? AND year=? AND month=?
-          AND payment_type IN ({placeholders})
-        ORDER BY adjusted_date, payee
-    """
-    with get_connection() as conn:
-        return pd.read_sql_query(
-            sql, conn, params=(user_id, year, month, *ROLLOVER_TYPES)
-        )
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("year", year)
+        .eq("month", month)
+        .in_("payment_type", list(ROLLOVER_TYPES))
+        .order("adjusted_date")
+        .execute()
+    )
+    if not response.data:
+        return pd.DataFrame()
+    df = pd.DataFrame(response.data)
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    return df
 
 
-def check_next_month_exists(next_year: int, next_month: int, user_id: int) -> int:
-    with get_connection() as conn:
-        return conn.execute(
-            "SELECT COUNT(*) FROM payments WHERE user_id=? AND year=? AND month=?",
-            (user_id, next_year, next_month),
-        ).fetchone()[0]
+def check_next_month_exists(next_year: int, next_month: int, user_id: str) -> int:
+    client = get_supabase()
+    response = (
+        client.table("payments")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("year", next_year)
+        .eq("month", next_month)
+        .execute()
+    )
+    return len(response.data) if response.data else 0
 
 
 def execute_rollover(
-    next_year: int, next_month: int, items: list[dict], user_id: int
+    next_year: int, next_month: int, items: list[dict], user_id: str
 ) -> int:
     from modules.holiday import adjust_payment_date
-    count = 0
+    rows = []
     for item in items:
         adj = adjust_payment_date(next_year, next_month, item.get("payment_day") or 1)
-        data = {
-            "user_id": user_id,
-            "year": next_year,
-            "month": next_month,
-            "payee": item["payee"],
-            "description": item["description"],
-            "payment_type": item["payment_type"],
-            "payment_day": item["payment_day"],
-            "adjusted_date": adj.isoformat() if adj else None,
-            "amount": item["amount"],
-            "payment_method": item["payment_method"],
-            "status": "unpaid",
-            "category": item["category"],
-            "notes": item["notes"],
-        }
-        add_payment(data)
-        count += 1
-    return count
+        rows.append({
+            "user_id":        user_id,
+            "year":           next_year,
+            "month":          next_month,
+            "payee":          item["payee"],
+            "description":    item.get("description", ""),
+            "payment_type":   item["payment_type"],
+            "payment_day":    item.get("payment_day"),
+            "adjusted_date":  adj.isoformat() if adj else None,
+            "amount":         float(item.get("amount", 0) or 0),
+            "payment_method": item.get("payment_method", ""),
+            "status":         "unpaid",
+            "category":       item.get("category", ""),
+            "notes":          item.get("notes", ""),
+        })
 
+    if not rows:
+        return 0
 
-# ─── テンプレートCRUD ────────────────────────────────────────
-
-def get_templates_df() -> pd.DataFrame:
-    with get_connection() as conn:
-        return pd.read_sql_query(
-            "SELECT * FROM payment_templates WHERE is_active=1 ORDER BY payee",
-            conn,
-        )
-
-
-def add_template(data: dict) -> int:
-    sql = """
-        INSERT INTO payment_templates
-            (payee, description, payment_type, payment_day,
-             amount, payment_method, category, notes)
-        VALUES
-            (:payee, :description, :payment_type, :payment_day,
-             :amount, :payment_method, :category, :notes)
-    """
-    with get_connection() as conn:
-        cur = conn.execute(sql, data)
-        return cur.lastrowid
-
-
-def delete_template(template_id: int) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            "UPDATE payment_templates SET is_active=0 WHERE id=?",
-            (template_id,),
-        )
+    client = get_supabase()
+    response = client.table("payments").insert(rows).execute()
+    return len(response.data) if response.data else 0
 
 
 # ─── 一括インポート ────────────────────────────────────────────
 
 def bulk_insert_payments(payments: list[dict]) -> int:
-    count = 0
-    for data in payments:
-        add_payment(data)
-        count += 1
-    return count
+    if not payments:
+        return 0
+    insert_rows = [
+        {k: p[k] for k in PAYMENT_INSERT_FIELDS if k in p}
+        for p in payments
+    ]
+    client = get_supabase()
+    response = client.table("payments").insert(insert_rows).execute()
+    return len(response.data) if response.data else 0

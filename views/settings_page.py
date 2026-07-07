@@ -1,12 +1,7 @@
-"""設定・バックアップ・CSVインポートページ"""
+"""設定・CSVインポート・エクスポートページ"""
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
-from modules.backup import (
-    create_backup, list_backups, restore_backup,
-    delete_backup, get_backup_size_total,
-)
 from modules.csv_handler import (
     import_from_csv, export_to_csv, get_import_template_csv
 )
@@ -20,66 +15,47 @@ from config.settings import APP_NAME, APP_VERSION
 def show_settings():
     user_id = st.session_state["user_id"]
 
-    st.markdown("## ⚙️ 設定・バックアップ・インポート")
+    st.markdown("## ⚙️ 設定・インポート・エクスポート")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "💾 バックアップ",
+        "☁️ Supabase",
         "📥 CSVインポート",
         "📤 CSVエクスポート",
         "ℹ️ システム情報",
     ])
 
-    # ─── Tab1: バックアップ ────────────────────────────────
+    # ─── Tab1: Supabase 情報 ──────────────────────────────
 
     with tab1:
-        st.markdown("### 💾 データバックアップ・復元")
-        st.info("バックアップはアプリフォルダ内の `backups/` に保存されます。最大20件保持します。")
+        st.markdown("### ☁️ Supabase データベース")
+        st.info(
+            "データは Supabase のクラウドデータベースに保存されています。  \n"
+            "アプリのスリープ・再起動によるデータ消失はありません。"
+        )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### バックアップを作成")
-            desc = st.text_input("説明（任意）", placeholder="例：月末確認前バックアップ")
-            if st.button("💾 今すぐバックアップ", type="primary", use_container_width=True):
-                with st.spinner("バックアップ中..."):
-                    filename = create_backup(desc)
-                st.success(f"✅ バックアップ完了：{filename}")
-                st.rerun()
+        try:
+            from modules.supabase_client import get_supabase
+            get_supabase()
+            st.success("✅ Supabase に接続中")
+        except Exception as e:
+            st.error(f"❌ Supabase 接続エラー: {e}")
 
-        with col2:
-            total_size = get_backup_size_total()
-            st.markdown(f"#### バックアップ一覧　（合計 {total_size} MB）")
-            backups = list_backups()
-            if not backups:
-                st.info("バックアップファイルがありません。")
-            else:
-                for b in backups:
-                    with st.container():
-                        bc1, bc2, bc3 = st.columns([3, 1, 1])
-                        with bc1:
-                            created = b.get("created_at", "")
-                            try:
-                                created_fmt = datetime.fromisoformat(created).strftime("%Y/%m/%d %H:%M")
-                            except Exception:
-                                created_fmt = created
-                            st.markdown(
-                                f"**{created_fmt}**　{b.get('description', '')}  \n"
-                                f"<small>{b['filename']}　{b.get('size_kb', 0)} KB</small>",
-                                unsafe_allow_html=True,
-                            )
-                        with bc2:
-                            if st.button("↩ 復元", key=f"restore_{b['filename']}", use_container_width=True):
-                                with st.spinner("復元中..."):
-                                    ok = restore_backup(b["filename"])
-                                if ok:
-                                    st.success("✅ 復元しました。ページを再読み込みしてください。")
-                                else:
-                                    st.error("❌ 復元に失敗しました。")
-                        with bc3:
-                            if st.button("🗑️", key=f"del_{b['filename']}", use_container_width=True):
-                                delete_backup(b["filename"])
-                                st.success("削除しました。")
-                                st.rerun()
-                        st.divider()
+        st.divider()
+        st.markdown("#### バックアップについて")
+        st.markdown(
+            "データのバックアップは **Supabase ダッシュボード** から管理できます。  \n"
+            "- **Settings → Database → Backups** でポイントインタイムリカバリが利用可能です。  \n"
+            "- CSV エクスポート（📤 CSVエクスポートタブ）でローカルにデータを保存できます。"
+        )
+
+        st.divider()
+        st.markdown("#### 接続設定")
+        st.code(
+            "# .streamlit/secrets.toml\n"
+            'SUPABASE_URL = "https://your-project.supabase.co"\n'
+            'SUPABASE_ANON_KEY = "your-anon-key"',
+            language="toml",
+        )
 
     # ─── Tab2: CSVインポート ──────────────────────────────
 
@@ -144,7 +120,6 @@ def show_settings():
                     f"▶ {import_year}年{import_month}月にインポートする",
                     type="primary",
                 ):
-                    # ログイン中ユーザーの user_id を付加する
                     for p in payments:
                         p["user_id"] = user_id
                     with st.spinner("インポート中..."):
@@ -210,16 +185,23 @@ def show_settings():
 
     with tab4:
         st.markdown("### ℹ️ システム情報")
-        from config.settings import DB_PATH, BACKUP_DIR
+
+        import os
+        supabase_url = ""
+        try:
+            import streamlit as _st
+            supabase_url = _st.secrets.get("SUPABASE_URL") or os.environ.get("SUPABASE_URL", "（未設定）")
+        except Exception:
+            supabase_url = os.environ.get("SUPABASE_URL", "（未設定）")
 
         info_rows = [
-            ("アプリ名",              APP_NAME),
-            ("バージョン",            APP_VERSION),
-            ("Streamlit バージョン",  st.__version__),
-            ("データベースファイル",  str(DB_PATH)),
-            ("バックアップフォルダ",  str(BACKUP_DIR)),
-            ("ログインユーザー",      st.session_state.get("user_name", "")),
-            ("メールアドレス",        st.session_state.get("user_email", "")),
+            ("アプリ名",             APP_NAME),
+            ("バージョン",           APP_VERSION),
+            ("Streamlit バージョン", st.__version__),
+            ("データベース",         "Supabase (PostgreSQL)"),
+            ("Supabase URL",         supabase_url),
+            ("ログインユーザー",     st.session_state.get("user_name", "")),
+            ("メールアドレス",       st.session_state.get("user_email", "")),
         ]
 
         for label, value in info_rows:
@@ -234,6 +216,5 @@ def show_settings():
         - 📅 **Googleカレンダー連携**：支払日を自動登録
         - 📱 **LINE通知**：支払い期限をLINEで通知
         - 📧 **メール通知**：期限超過時の自動メール
-        - 🏢 **マルチユーザー対応**：チームで共有
         - 📊 **予算管理機能**：カテゴリ別予算設定と差異分析
         """)
